@@ -1,33 +1,27 @@
 # Copyright (c) 2020 Oracle and/or its affiliates.
 # Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl/
-
 FROM oraclelinux:8-slim
 
-# Note: If you are behind a web proxy, set the build variables for the build:
-#       E.g.:  docker build --build-arg "https_proxy=..." --build-arg "http_proxy=..." --build-arg "no_proxy=..." ...
+ARG GRAALVM_VERSION=20.2.0
+ARG JAVA_VERSION=11
+
+ENV LANG=en_US.UTF-8 \
+    JAVA_HOME=/opt/graalvm-ee-java$JAVA_VERSION-$GRAALVM_VERSION \
+    TAR_FILE=graalvm-ee-java${JAVA_VERSION}-linux-amd64-${GRAALVM_VERSION}.tar.gz \
+    LLVM_JAR=llvm-toolchain-installable-java${JAVA_VERSION}-linux-amd64-${GRAALVM_VERSION}.jar \
+    NATIVE_IMAGE_JAR=native-image-installable-svm-svmee-java${JAVA_VERSION}-linux-amd64-${GRAALVM_VERSION}.jar
+
+ADD installs/${TAR_FILE} /opt
+ADD installs/${LLVM_JAR} .
+ADD installs/${NATIVE_IMAGE_JAR} .
+ADD gu-wrapper.sh /usr/local/bin/gu
 
 RUN microdnf update -y oraclelinux-release-el8 \
     && microdnf --enablerepo ol8_codeready_builder install bzip2-devel ed gcc gcc-c++ gcc-gfortran gzip file fontconfig less libcurl-devel make openssl openssl-devel readline-devel tar \
     vi which xz-devel zlib-devel findutils glibc-static libstdc++ libstdc++-devel libstdc++-static zlib-static \
-    && microdnf clean all
-
-RUN fc-cache -f -v
-
-ARG GRAALVM_VERSION=20.2.0
-ARG JAVA_VERSION=java11
-ARG GRAALVM_PKG=https://github.com/graalvm/graalvm-ce-builds/releases/download/vm-$GRAALVM_VERSION/graalvm-ce-$JAVA_VERSION-GRAALVM_ARCH-$GRAALVM_VERSION.tar.gz
-ARG TARGETPLATFORM
-
-ENV LANG=en_US.UTF-8 \
-    JAVA_HOME=/opt/graalvm-ce-$JAVA_VERSION-$GRAALVM_VERSION/
-
-ADD gu-wrapper.sh /usr/local/bin/gu
-RUN set -eux \
-    && if [ "$TARGETPLATFORM" == "linux/amd64" ]; then GRAALVM_PKG=${GRAALVM_PKG/GRAALVM_ARCH/linux-amd64}; fi \
-    && if [ "$TARGETPLATFORM" == "linux/arm64" ]; then GRAALVM_PKG=${GRAALVM_PKG/GRAALVM_ARCH/linux-aarch64}; fi \
-    && curl --fail --silent --location --retry 3 ${GRAALVM_PKG} \
-    | gunzip | tar x -C /opt/ \
-
+    && microdnf clean all \
+    && fc-cache -f -v \
+    && set -eux \
     # Set alternative links
     && mkdir -p "/usr/java" \
     && ln -sfT "$JAVA_HOME" /usr/java/default \
@@ -37,7 +31,14 @@ RUN set -eux \
     [ ! -e "/usr/bin/$base" ]; \
     alternatives --install "/usr/bin/$base" "$base" "$bin" 20000; \
     done \
-
-    && chmod +x /usr/local/bin/gu
+    && chmod +x /usr/local/bin/gu \
+    && gu install -L ${LLVM_JAR} \
+    && gu install -L ${NATIVE_IMAGE_JAR} \
+    && alternatives --install /usr/bin/native-image native-image ${JAVA_HOME}/bin/native-image 300000 \
+    && microdnf clean all \
+    && rm -rf /var/cache/yum \
+    && rm -f ${LLVM_JAR} \
+    && rm -f ${NATIVE_IMAGE_JAR} \
+    && rm -f ${TAR_FILE}
 
 CMD java -version
